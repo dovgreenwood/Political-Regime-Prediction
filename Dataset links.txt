@@ -1,0 +1,31 @@
+https://ourworldindata.org/grapher/political-regime-updated2016
+
+https://ourworldindata.org/grapher/mean-years-of-schooling-long-run?tab=chart
+
+https://ourworldindata.org/grapher/use-of-interpolation-and-extrapolation-on-gini-data
+
+https://ourworldindata.org/grapher/reconstruction-of-historical-poverty-trends-by-country
+
+https://ourworldindata.org/grapher/use-of-interpolation-and-extrapolation-on-maddison-gdp-per-capita-data
+
+https://ourworldindata.org/grapher/population-density-3
+
+https://ourworldindata.org/grapher/population-by-country DEPRECATED
+
+https://www.gapminder.org/data/		(life expectancy, child mortality, population NEW)
+
+
+
+
+
+
+
+20th century only:
+
+https://ourworldindata.org/grapher/life-expectancy
+
+https://ourworldindata.org/grapher/economic-inequality-gini-index
+
+https://ourworldindata.org/grapher/poverty-rate-60-of-median-lis-key-figures
+
+https://ourworldindata.org/grapher/world-map-of-the-freedom-of-the-press-status
