@@ -1,0 +1,118 @@
+---
+title: "The End of History? Predicting Future Political Regimes"
+au: Dov Greenwood
+date: "12/21/21"
+output:
+  html_document:
+    df_print: paged
+---
+
+# Abstract
+In his 1992 book, The End of History and the Last Man, Francis Fukuyama famously predicted that with the dissolution of the Soviet Union, the world was reaching an equilibrium in which Western liberal democracy would become the dominant—and final—form of government across the world. Since then, however, trends have been more complicated; for example, the Arab Spring saw a movement toward liberal values in the Middle East, yet many previously Soviet states have declined back toward autocracy. Thus, while liberal democracy remains attractive to the masses, it is an open question whether it will indeed become—and whether it has been—ascendant. In this project, I have statistically evaluated this thesis on the basis of data collected on the growth and decline of liberal political regimes over the past thirty years. 
+
+```{r echo=FALSE}
+library(tidyverse)
+library(gganimate)
+library(transformr)
+```
+
+
+```{r}
+regime.table <- read_rds('Data.rds')
+head(regime.table[sample(1:nrow(regime.table)),])
+```
+
+
+```{r}
+year.table <- as.data.frame( table(regime.table$Year) ) %>% 
+  rename(Year = Var1) %>% arrange(Freq)
+
+print( paste('Median frequency:', floor(median(year.table$Freq))) )
+print( paste('Mean frequency:', floor(mean(year.table$Freq))) )
+
+head(rbind(head(year.table, 5), tail(year.table, 5)), 10)
+```
+
+
+```{r}
+boxplot(RegimeInt ~ Year, data = regime.table %>% 
+          mutate(RegimeInt = as.integer(Regime) - 11),
+        ylab = 'Polity5 Regime Index', col = 'aquamarine3', 
+        varwidth = TRUE)
+```
+
+```{r}
+entity.table <- as.data.frame( table(regime.table$Entity) ) %>% 
+  rename(Entity = Var1) %>% arrange(Freq)
+
+print( paste('Median frequency:', floor(median(entity.table$Freq))) )
+print( paste('Mean frequency:', floor(mean(entity.table$Freq))) )
+
+head(rbind(head(entity.table, 5), tail(entity.table, 5)), 10)
+```
+
+```{r}
+# Prepare regime data for world map
+for.map <- regime.table[c('Entity', 'Regime', 'Year')] %>% 
+  rename(region = Entity) %>% mutate(Regime = as.integer(Regime))
+
+# Prepare world data for world map
+world <- map_data('world') %>% select(-c('subregion'))
+world[world == 'UK'] <- 'United Kingdom'
+world[world == 'USA'] <- 'United States'
+world[world == 'Trinidad' | world == 'Tobago'] <- 'Trinidad and Tobago'
+
+# Create list of data frames for animation
+map_by_year <- function(coords, regimes, year) {
+  regimes.year <- regimes[regimes$Year == year,]
+  map.year     <- merge(regimes.year, coords, all = TRUE, by = 'region')
+  map.year     <- map.year[order(map.year$order),]
+  return(map.year)
+}
+
+year.min <- min(for.map$Year)
+year.max <- max(for.map$Year)
+years.to_map <- seq(year.min, year.max, ceiling((year.max - year.min)/10))
+map.years <- lapply(years.to_map, function(x) { map_by_year(world, for.map, x) })
+```
+
+```{r}
+m <- do.call('rbind', map.years) %>% drop_na(Year)
+```
+
+```{r}
+world.map <- ggplot(data = m, aes(x = long, y = lat)) + 
+  geom_map(map = m, aes(map_id = region),
+           color = 'black', fill = m$Regime, size = 0.1) +
+  #transition_time(Year)
+  transition_manual(frames = Year)
+animate(world.map, fps = 1)
+```
+
+```{r}
+world.map <- ggplot(data = world, aes(x = long, y = lat)) + 
+  geom_map(map = world, aes(map_id = region),
+           color = 'black', fill = map.years[[1]]$Regime, size = 0.1)
+world.map
+```
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
