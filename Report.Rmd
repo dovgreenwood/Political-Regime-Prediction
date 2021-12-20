@@ -5,100 +5,408 @@ date: "12/21/21"
 output:
   html_document:
     df_print: paged
+  pdf_document: default
 ---
 
-# Abstract
-In his 1992 book, The End of History and the Last Man, Francis Fukuyama famously predicted that with the dissolution of the Soviet Union, the world was reaching an equilibrium in which Western liberal democracy would become the dominant—and final—form of government across the world. Since then, however, trends have been more complicated; for example, the Arab Spring saw a movement toward liberal values in the Middle East, yet many previously Soviet states have declined back toward autocracy. Thus, while liberal democracy remains attractive to the masses, it is an open question whether it will indeed become—and whether it has been—ascendant. In this project, I have statistically evaluated this thesis on the basis of data collected on the growth and decline of liberal political regimes over the past thirty years. 
+### Note:
+**This R Markdown notebook is best viewed as an HTML, as it contains animated visualizations that will not appear in a PDF file. R Markdown will not be able to compile this file into a PDF unless the animated code block is suppressed with `eval=FALSE`; in such a case, the block below should be set to `eval=TRUE`.**
 
-```{r echo=FALSE}
-library(tidyverse)
+# Abstract
+This study attempts to tackle the question: what historical factors influence the form of political regime that a country takes on, and can those factors be used to predict future trends? To this end, I collected internal data (GDP, life span, etc.) from over 100 countries from the past 200 years, in addition to data on their corresponding political regimes from the Polity5 project. The data was staggered in the fashion of a time series, using the previous ten years of data to predict a current year's political regime; after cleaning, this presented almost 8000 data points. To accomplish this task, I built a linear model using lasso and cross validation to choose the most relevant predictors. Results were ambivalent, with predictions for the year 2017 falling within 6 points of the actual value, on average. As such, it appears that these predictors and their trends are not sufficient to get a clear picture of political regime development.
+
+
+# Introduction
+In his 1992 book, *The End of History and the Last Man*, Francis Fukuyama famously predicted that with the dissolution of the Soviet Union, the world was reaching an equilibrium in which Western liberal democracy would become the dominant—and final—form of government across the world. This raises an interesting question: what historical factors influence the form of political regime that a country takes on, and can those factors be used to predict future trends? My goal was to answer this question on the basis of data collected on countries' political regimes over the past 200 years.  
+
+For the predictors, data was collected from [Gap Minder](https://www.gapminder.org/data/) and [Our World in Data](https://ourworldindata.org/). As predictors, I used only internal and objective numeric data from each country; these included: GDP per capita, [Gini Coefficient](https://en.wikipedia.org/wiki/Gini_coefficient), and poverty rate; infant mortality and average lifespan; population; and average number of years in school. Together, these can be taken to represent the society's economic stability and opportunity, quality of life, and education--all of which are commonly thought to be the backbone of democracy.  
+
+The previous decade's worth of these features were used to predict the country's political regime in a given year, as measured by the [Polity5 Regime Assessment](http://www.systemicpeace.org/inscrdata.html), which ranks political regimes on an integer scale of -10 (complete autocracy) to 10 (complete democracy). This ranking does not rely on any of the aforementioned predictors, but rather arises from a qualitative evaluation of the regime itself.  
+
+Section 1 contains examples from the data set, exploration of what it contains, and visualizations to assist in perceiving the data with regards to time and space. In Section 2, I analyze this data and build several linear models on the basis of this analysis, then select the best one, based on its high $R^2$. However, in Section 3, I conclude that in spite of this, the model does not work well for prediction, having a huge RMSE on both randomized and sequential test sets; this is emphasized by a visual presentation of the model's predictions. Finally, in section 4, I discuss why this might be and suggest future avenues of study.  
+
+
+```{r echo=FALSE, message=FALSE}
 library(gganimate)
 library(transformr)
+library(RColorBrewer)
+library(gridExtra)
+library(glmnet)
+library(tidyverse)
+
+set.seed(39415)
 ```
 
 
-```{r}
+
+# Section 1: Data Exploration and Visualization
+Below is an example of five randomized rows from the data set. As one can see, each row contains: (1) Entity and Year identifiers; (2) the Polity5 regime assessment; (3) the previous decade's predictors, with a $1$ marking the first year of that decade (i.e. 10 years before the prediction year), and a $10$ marking the last. The data contains roughly 8000 rows.
+
+```{r echo=FALSE}
 regime.table <- read_rds('Data.rds')
-head(regime.table[sample(1:nrow(regime.table)),])
+head(regime.table[sample(1:nrow(regime.table)),], 5)
 ```
 
 
-```{r}
+As a result of the data cleaning that resulted in this data, thousands of rows needed to be thrown away. Thus, not every country is represented equally in the data, nor is every year represented equally. Below are tables with the 5 least represented and 5 most represented countries and years in the data, accompanied by the mean and median frequencies of each.
+
+```{r echo=FALSE}
+entity.table <- as.data.frame( table(regime.table$Entity) ) %>% 
+  rename(Entity = Var1) %>% arrange(Freq)
+
+print( paste('Median frequency (country):', floor(median(entity.table$Freq))) )
+print( paste('Mean frequency (country):', floor(mean(entity.table$Freq))) )
+
+head(rbind(head(entity.table, 5), tail(entity.table, 5)), 10)
+```
+
+```{r echo=FALSE}
 year.table <- as.data.frame( table(regime.table$Year) ) %>% 
   rename(Year = Var1) %>% arrange(Freq)
 
-print( paste('Median frequency:', floor(median(year.table$Freq))) )
-print( paste('Mean frequency:', floor(mean(year.table$Freq))) )
+print( paste('Median frequency (year):', floor(median(year.table$Freq))) )
+print( paste('Mean frequency (year):', floor(mean(year.table$Freq))) )
 
 head(rbind(head(year.table, 5), tail(year.table, 5)), 10)
 ```
 
 
-```{r}
-boxplot(RegimeInt ~ Year, data = regime.table %>% 
-          mutate(RegimeInt = as.integer(Regime) - 11),
-        ylab = 'Polity5 Regime Index', col = 'aquamarine3', 
-        varwidth = TRUE)
-```
+It is difficult, however, to conceptualize this and the impact it may have on our model. To assist in this, below is an animated world map contained 20 evenly spaced sample years from the data. Through it, one can see the changes in the data set from year to year, and whether it will have a major impact.
 
-```{r}
-entity.table <- as.data.frame( table(regime.table$Entity) ) %>% 
-  rename(Entity = Var1) %>% arrange(Freq)
-
-print( paste('Median frequency:', floor(median(entity.table$Freq))) )
-print( paste('Mean frequency:', floor(mean(entity.table$Freq))) )
-
-head(rbind(head(entity.table, 5), tail(entity.table, 5)), 10)
-```
-
-```{r}
+```{r echo=FALSE}
 # Prepare regime data for world map
 for.map <- regime.table[c('Entity', 'Regime', 'Year')] %>% 
-  rename(region = Entity) %>% mutate(Regime = as.integer(Regime))
+  rename(region = Entity) %>% mutate(Regime = as.integer(Regime) - 11)
 
 # Prepare world data for world map
 world <- map_data('world') %>% select(-c('subregion'))
 world[world == 'UK'] <- 'United Kingdom'
 world[world == 'USA'] <- 'United States'
 world[world == 'Trinidad' | world == 'Tobago'] <- 'Trinidad and Tobago'
+```
 
+```{r echo=FALSE}
 # Create list of data frames for animation
 map_by_year <- function(coords, regimes, year) {
   regimes.year <- regimes[regimes$Year == year,]
   map.year     <- merge(regimes.year, coords, all = TRUE, by = 'region')
   map.year     <- map.year[order(map.year$order),]
+  map.year$Year[is.na(map.year$Year)] <- year
   return(map.year)
 }
 
-year.min <- min(for.map$Year)
-year.max <- max(for.map$Year)
-years.to_map <- seq(year.min, year.max, ceiling((year.max - year.min)/10))
+all.years <- unique(for.map$Year)
+years.to_map <- all.years[seq(1, length(all.years), ceiling(length(all.years))/20)]
 map.years <- lapply(years.to_map, function(x) { map_by_year(world, for.map, x) })
+
+m <- do.call('rbind', map.years)
+m <- m[order(m$order),]
 ```
 
-```{r}
-m <- do.call('rbind', map.years) %>% drop_na(Year)
-```
+```{r echo=FALSE}
+world.map <- ggplot(data = m, 
+                    aes(x = long, y = lat, fill = Regime, frame = Year)) + 
+  geom_map(map = m, aes(map_id = region), color = 'black', size = 0.1) +
+  scale_fill_gradient2(low = "orange", high = "deepskyblue3", mid = "white") + 
+  theme_bw() + transition_states(Year) + transition_manual(Year) + 
+  labs(title = '{current_frame}')
 
-```{r}
-world.map <- ggplot(data = m, aes(x = long, y = lat)) + 
-  geom_map(map = m, aes(map_id = region),
-           color = 'black', fill = m$Regime, size = 0.1) +
-  #transition_time(Year)
-  transition_manual(frames = Year)
-animate(world.map, fps = 1)
-```
 
-```{r}
-world.map <- ggplot(data = world, aes(x = long, y = lat)) + 
-  geom_map(map = world, aes(map_id = region),
-           color = 'black', fill = map.years[[1]]$Regime, size = 0.1)
-world.map
+animate(world.map, fps = 10)
 ```
 
 
+```{r echo=FALSE, eval=FALSE}
+# REPLACEMENT CODE FOR SIDE-BY-SIDE MAPS IN PDF OUTPUT
+maps = vector("list", length(20))
+
+for(i in 1:20) {
+  mp <- map.years[[i]]
+  maps[[i]] <- ggplot(data = mp, 
+                      aes(x = long, y = lat, fill = Regime)) + 
+  geom_map(map = mp, aes(map_id = region), color = 'black', size = 0.1) +
+  scale_fill_gradient2(low = 'orange', high = 'deepskyblue3', mid = 'white') + 
+  theme_bw() + guides(fill = 'none') + labs(title = mp$Year) 
+  
+  print(maps[[i]])
+}
+```
 
 
+As one can see, the sampling is relatively sparse for the first several years represented, with almost all of the African continent entirely absent. As time progresses, however, more countries are represented. Moreover, large swaths of Europe, Asia, and North and South America are present throughout. While this should raise bias concerns about using "Year" as a prediction variable--it is not used in the model--it nevertheless appears reliable to gain insight about larger trends in the data over time. Below, I have done just that.
+
+```{r echo=FALSE}
+boxplot(RegimeInt ~ Year, data = regime.table %>% 
+          mutate(RegimeInt = as.integer(Regime) - 11),
+        ylab = 'Polity5 Regime Index', col = 'aquamarine3', 
+        varwidth = TRUE)
+```
+
+This graph could effectively be called a visualization of "Fukuyama's hypothesis." Indeed, at least based on this subjective regime assessment index, he appears to be correct in asserting that democracy is ascendant and the world is nearing an equilibrium. In this series of boxplots, the median reaches a sort of equilibrium in 1993, with the median firmly in the region of democracy. Moreover, about 75% of the data is higher than a 0, and thus also to some extent "democratic." However, the large valley between 1960 and 1993 should be noted, in spite of the fact that there is less data in this time period (represented by the thinner boxes). This dip and rebound within a 40 year span indicates that massive changes can occur within decades, and thus any hypothesis should take into account large amounts of data from large time spans.  
+
+
+The following plots examine the relation of the possible features to the Regime target variables. For space constraints, only years 1 and 10 are plotted. In cases where the log values represent better predictors than the actual values, all four plots are shown.
+
+```{r echo=FALSE, warning=FALSE}
+regime.table_num <- regime.table %>% mutate(Regime = as.numeric(Regime) - 11)
+
+gdp1.plot  <- ggplot(regime.table_num, aes(x = GDPPerCapita1, y = jitter(Regime))) +
+  geom_point() + geom_smooth(method = 'lm') + 
+  xlim(0, max(regime.table_num$GDPPerCapita1)) + 
+  ylim(-10, 10)
+gdp10.plot <- ggplot(regime.table_num, aes(x = GDPPerCapita10, y = jitter(Regime))) +
+  geom_point() + geom_smooth(method = 'lm') + 
+  xlim(0, max(regime.table_num$GDPPerCapita10)) + 
+  ylim(-10, 10)
+
+gdp1_log.plot  <- ggplot(regime.table_num, aes(x = log(GDPPerCapita1), y = jitter(Regime))) +
+  geom_point() + geom_smooth(method = 'lm') + 
+  xlim(min(log(regime.table_num$GDPPerCapita1)), max(log(regime.table_num$GDPPerCapita1))) + 
+  ylim(-10, 10)
+gdp10_log.plot <- ggplot(regime.table_num, aes(x = log(GDPPerCapita10), y = jitter(Regime))) +
+  geom_point() + geom_smooth(method = 'lm') + 
+  xlim(min(log(regime.table_num$GDPPerCapita10)), max(log(regime.table_num$GDPPerCapita10))) + 
+  ylim(-10, 10)
+
+grid.arrange(gdp1.plot, gdp10.plot, gdp1_log.plot, gdp10_log.plot, ncol = 2, nrow = 2)
+```
+
+```{r echo=FALSE, warning=FALSE}
+gini1.plot  <- ggplot(regime.table_num, aes(x = GiniCoef1, y = jitter(Regime))) +
+  geom_point() + geom_smooth(method = 'lm') + 
+  xlim(min(regime.table_num$GiniCoef1), max(regime.table_num$GiniCoef1)) + 
+  ylim(-10, 10)
+gini10.plot <- ggplot(regime.table_num, aes(x = GiniCoef10, y = jitter(Regime))) +
+  geom_point() + geom_smooth(method = 'lm') + 
+  xlim(min(regime.table_num$GiniCoef10), max(regime.table_num$GiniCoef10)) + 
+  ylim(-10, 10)
+
+grid.arrange(gini1.plot, gini10.plot, ncol = 2)
+```
+
+```{r echo=FALSE, warning=FALSE}
+poverty.plot  <- ggplot(regime.table_num, aes(x = DecadePoverty, y = jitter(Regime))) +
+  geom_point() + geom_smooth(method = 'lm') + 
+  xlim(0, max(regime.table_num$DecadePoverty)) + 
+  ylim(-10, 10)
+
+poverty.plot
+```
+
+```{r echo=FALSE, warning=FALSE}
+infm1.plot  <- ggplot(regime.table_num, aes(x = InfantMortality1, y = jitter(Regime))) +
+  geom_point() + geom_smooth(method = 'lm') + 
+  xlim(0, max(regime.table_num$InfantMortality1)) + 
+  ylim(-10, 10)
+infm10.plot <- ggplot(regime.table_num, aes(x = InfantMortality10, y = jitter(Regime))) +
+  geom_point() + geom_smooth(method = 'lm') + 
+  xlim(0, max(regime.table_num$InfantMortality10)) + 
+  ylim(-10, 10)
+
+grid.arrange(infm1.plot, infm10.plot, ncol = 2)
+```
+
+```{r echo=FALSE, warning=FALSE}
+regime.table_num <- regime.table %>% mutate(Regime = as.numeric(Regime) - 11)
+
+pop1.plot  <- ggplot(regime.table_num, aes(x = Population1, y = jitter(Regime))) +
+  geom_point() + geom_smooth(method = 'lm') + 
+  xlim(min(regime.table_num$Population1), max(regime.table_num$Population1)) + 
+  ylim(-10, 10)
+pop10.plot <- ggplot(regime.table_num, aes(x = Population10, y = jitter(Regime))) +
+  geom_point() + geom_smooth(method = 'lm') + 
+  xlim(min(regime.table_num$Population10), max(regime.table_num$Population10)) + 
+  ylim(-10, 10)
+
+pop1_log.plot  <- ggplot(regime.table_num, aes(x = log(Population1), y = jitter(Regime))) +
+  geom_point() + geom_smooth(method = 'lm') + 
+  xlim(min(log(regime.table_num$Population1)), max(log(regime.table_num$Population1))) + 
+  ylim(-10, 10)
+pop10_log.plot <- ggplot(regime.table_num, aes(x = log(Population10), y = jitter(Regime))) +
+  geom_point() + geom_smooth(method = 'lm') + 
+  xlim(min(log(regime.table_num$Population10)), max(log(regime.table_num$Population10))) + 
+  ylim(-10, 10)
+
+grid.arrange(pop1.plot, pop10.plot, pop1_log.plot, pop10_log.plot, ncol = 2, nrow = 2)
+```
+
+```{r echo=FALSE, warning=FALSE}
+ysch1.plot  <- ggplot(regime.table_num, aes(x = YearsSchooling1.5, y = jitter(Regime))) +
+  geom_point() + geom_smooth(method = 'lm') + 
+  xlim(0, max(regime.table_num$YearsSchooling1.5)) + 
+  ylim(-10, 10)
+ysch10.plot <- ggplot(regime.table_num, aes(x = YearsSchooling6.10, y = jitter(Regime))) +
+  geom_point() + geom_smooth(method = 'lm') + 
+  xlim(0, max(regime.table_num$YearsSchooling6.10)) + 
+  ylim(-10, 10)
+
+grid.arrange(ysch1.plot, ysch10.plot, ncol = 2)
+```
+
+While it is not immediately apparent whether all of these variables can be correlated with the Regime response variable, several show at least a degree of linear relationship. Soem of these variables also may be colinear. Both of these will be examined in the model building process, below.
+
+
+
+# Section 2: Modeling/Analysis
+
+For my model, I chose to use a linear regression model, rather than a multinomial logistic regression model. The latter may have been the more obvious choice for discrete response variables, but the former provides the advantage that, since these responses are numerically hierarchical, they have an order that should be taken into account. (I originally attempted to use numerous R packages that perform logistic regression on ordinal factor variables; however, R threw errors in numerous places, and after working through them for a long time to no avail, I decided to abandon this approach.)  
+
+In order to appraoch this problem in numerous ways, I used subsets of the predictive data that seemed reasonable; the years of predictors from the data that are used in these subsets appear below. Within each of these subsets, I used lasso and cross validation in order to whittle down the number of predictors within each of these subsets, and remove any colinearity (since lasso forces colinear predictors to zero). The output below represents the subset of years, followed by the predictors chosen by the lasso and cross validation, and finally the $R^2$ value of the model that uses those predictors.
+
+```{r echo=FALSE}
+##----------FUNCTIONS----------##
+names_times_x <- function(x, col_names) {
+  new_names <- c()
+  for(i in 1:x) {
+    names_x <- paste0(col_names, i)
+    new_names <- c(new_names, names_x)
+  }
+  return(new_names)
+}
+
+model.lasso_cv <- function(df) {
+  as.mat <- model.matrix(Regime ~ ., df)[,-1]
+  reg <- df$Regime
+  
+  cv_model <- cv.glmnet(as.mat, reg, alpha = 1, intercept = FALSE)
+  best_lambda <- cv_model$lambda.min
+  best_model <- glmnet(as.mat, reg, alpha = 1, lambda = best_lambda, 
+                       intercept = FALSE)
+  
+  return(best_model)
+}
+```
+
+```{r echo=FALSE}
+# Use logged values determined in the data exploration
+logged.table <- regime.table
+logged.table[,names_times_x(10, 'GDPPerCapita')] <- 
+  log(logged.table[,names_times_x(10, 'GDPPerCapita')])
+logged.table[,names_times_x(10, 'Population')] <- 
+  log(logged.table[,names_times_x(10, 'Population')])
+
+logged.table_with_year_and_entity <- logged.table %>% 
+  mutate(Regime = as.numeric(Regime))
+logged.table <- logged.table %>% select(-c('Year', 'Entity')) %>% 
+  mutate(Regime = as.numeric(Regime))
+
+
+##----------AUTOMATIC FEATURE SELECTION----------##
+all_features <- names(logged.table)
+
+# (1) 1,10; (2) 9,10; (3) 8,10; (4) 5,10; (5) 1-10; (6) 1-5
+selection.labels <- c('Years 1, 10', 'Years 9, 10', 'Years 8, 10', 
+                      'Years 5-10', 'Years 1-10', 'Years 1-5')
+selections <- list(c(all_features[grepl('.+(1|10)', all_features)]),
+                   c(all_features[grepl('.+(9|10)', all_features)]),
+                   c(all_features[grepl('.+(8|10)', all_features)]),
+                   c(all_features[grepl('[a-zA-Z](6.)*(5|10)', all_features)]),
+                   c(all_features[grepl('.+[0-9]', all_features)]),
+                   c(all_features[grepl('.+[1-5]$', all_features)]))
+selections <- lapply(selections, function(x) { c(all_features[c(1:2)], x) })
+
+models <- vector("list", length(selections))
+for(i in 1:length(selections)) {
+  selected <- logged.table[, selections[[i]]]
+
+  rval <- model.lasso_cv(selected)
+  models[[i]] <- rval
+
+  all.features <- coef(models[[i]])@Dimnames[[1]]
+  non_zero.indices <- !as.numeric(coef(models[[i]]) == 0)
+  non_zero.features <- all.features[non_zero.indices]
+
+  print(paste0('-----------', selection.labels[[i]], '-----------'))
+  print(sort(non_zero.features))
+  print(paste('R-squared:', models[[i]]$dev.ratio))
+}
+```
+
+
+The two sets of predictors with the highest $R^2$ value are the first one, that uses years 1 and 10, and the second to last, which uses years 1 *to* 10. Because of how close their values are, it is worth going with the first, for the sake of model simplicity and interpretability. Examining the coefficients of this model (coefficients marked with a '.' are 0), we find:
+
+```{r echo=FALSE}
+best.model <- models[[1]]
+coef(best.model)
+```
+
+
+On first glance, several of these variables appear either useless or redunant. DecadePoverty appears too small to be significant; GDPPerCapita10 is intuitively more worthwhile than GDPPerCapita1; and GiniCoef, InfantMorality, and LifeSpan appear to be redunant (especially if one looks at the plots above.) Removing these variables will leave us with a more intuitive model, giving the following:
+
+```{r echo=FALSE}
+new.features <- c('GDPPerCapita10', 'GiniCoef10', 
+                  'InfantMortality10', 'LifeSpan10', 'YearsSchooling1.5',
+                  'YearsSchooling6.10', 'Population1', 'Population10')
+new.table <- logged.table[c('Regime', new.features)]
+new.model <- lm(Regime ~ . - 1, data = new.table)
+summary(new.model)
+```
+
+This model actually has a higher $R^2$ than the previously observed one. It also also more intuitive, as the 10th year of data is preferred in cases when the first year of data is insignificant, since it is closer to the event at hand and therefore more likely to impact the results. Finally, the coefficients themselves are more interpretable. As in the graphs in Section 1, GDP per capita is the most significant predictor, as it the most linearly related; the next three predictors have significantly smaller, but somewhat noticeable, impact. Finally, the years of schooling and population variables from both ranges are included, representing that the variables themselves are less important than the change that occurs between them over time.  
+
+However, the $R^2$ is only a measure of how well these variables explain the variability in the data, not a measure of how well they can predict this data. In order to test this, I evaluate the model by separating it into a training (all years before 2017) and test (data from the year 2017) set, and measure the RMSE, which comes out to:
+
+```{r echo=FALSE}
+final.data <- logged.table_with_year_and_entity[, c('Regime', 'Entity', 'Year', new.features)]
+final.to_2017 <- final.data[final.data$Year < 2017,] %>% select(-c('Year', 'Entity'))
+final.2017 <- final.data[final.data$Year == 2017,]
+
+final.model <- lm(Regime ~ ., data = final.to_2017)
+
+final.predictions <- predict(final.model, final.2017, se.fit = TRUE)
+final.predicted <- trunc(final.predictions$fit)
+
+final.distance <- final.predicted - final.2017$Regime
+final.rmse <- sqrt(mean(final.distance^2))
+final.rmse
+```
+
+
+
+# Section 3: Visualization and interpretation of the results
+It is easy enough to see from the RMSE value that this model is not good at predicting the actual outcome to a reasonable degree. Since there are only 21 possible categories for the Regime response variable (-10 to 10), and RMSE of approximately 6 is not sufficient to be a "good" prediction range, as it is too broad. To visualize this, we may create a visualization that displays a selection of the predicted values from the year 2017 based on our above model against their actual values.
+
+```{r echo=FALSE}
+# Simulate to get probabilities for visualization
+standard_devs <- sqrt((final.predictions$se.fit)^2 + (final.predictions$residual.scale)^2)
+simulations <- replicate(10000, rnorm(final.predicted, mean = final.predicted, sd = standard_devs))
+simulations <- trunc(simulations) - 11
+simulations[simulations > 10] <- NA
+simulations[simulations < -10] <- NA
+
+counts <- lapply(c(-10:10), function(n) { rowSums(simulations == n, na.rm = TRUE) })
+counts <- do.call('cbind', counts)
+props <- t(apply(counts, 1, function(x) { x/sum(x) }))
+simulated_by_entity <- cbind(final.2017[c('Entity')], props)
+
+simulations.long <- simulated_by_entity %>% 
+  pivot_longer(cols = -c('Entity'), names_to = 'Predicted') %>%
+  rename(Probability = value)
+simulations.long$Predicted <- as.numeric(simulations.long$Predicted) - 11
+```
+
+```{r echo=FALSE}
+actual_values <- final.2017 %>% rename(Actual = Regime) %>% 
+  select(c('Entity', 'Actual')) %>% mutate(Actual = Actual - 11)
+actual_and_predicted <- merge(simulations.long, actual_values, by = 'Entity')
+
+countries <- unique(actual_and_predicted$Entity)
+countries_for_viewing <- countries[sample(1:length(countries))][c(1:20)]
+for.viewing <- actual_and_predicted[actual_and_predicted$Entity %in% countries_for_viewing,]
+
+ggplot(for.viewing, aes(x = Predicted, y = Entity, fill = Probability)) + geom_tile(size = 0.4) +
+  scale_fill_gradient(low = 'white', high = 'aquamarine3') +
+  geom_point(data = for.viewing, aes(x = Actual, y = Entity), col = 'black') + 
+  theme_bw() + labs(title = 'Predicted and Actual Polity5 Regime Values, 2017')
+```
+
+In this visualization, the black points represent the countries' actual regime assessments, while the sliding color scale represents the range of possible values from the model and their associated probabilities. This has been done by simulating 10,000 model results. As one can see, the points frequently fall within the "green zone," indicating that they are within the realm of possibility according to the model. However, they sometimes fall in the lighter zones as well, reflecting the instability of the model as described earlier. In other words, the conclusion to be drawn is that these predictors are insufficient for creating a reliable model on the basis of linear regression.
+
+
+
+# Section 4: Conclusions and recommendations
+As stated in the previous section, due to the high RMSE of the model, one cannot draw reliable conclusions from this. As such, I propose two avenues for further work and improvements. First, the data set that I have used is clearly insufficient to "predict" regime changes--this is true both quantitatively, as this study has shown, but also intuitively, as sudden regime changes, such as those resulting from coups, are inherently more difficult to predict using this data. However, this is not to say that such data does not exist--only that, due to lack of access, I have been unable to incorporate it into my model. Secondly, as I noted from the outset, I built a linear model, rather than an ordinal logistic regression model; the latter model might prove more effective than the one I chose, and would be possible to create with more time.  
+
+Finally, it is worth noting the inherent problem with the target data, that may make any study such as this difficult--namely, that it is more subjective than the predictive data. While the Polity5 regime assessments are relatively well-regarded, performing quantitative analysis with it thus poses problems to any researcher.
 
 
 

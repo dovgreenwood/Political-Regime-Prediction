@@ -8,10 +8,6 @@ https://ourworldindata.org/grapher/reconstruction-of-historical-poverty-trends-b
 
 https://ourworldindata.org/grapher/use-of-interpolation-and-extrapolation-on-maddison-gdp-per-capita-data
 
-https://ourworldindata.org/grapher/population-density-3
-
-https://ourworldindata.org/grapher/population-by-country DEPRECATED
-
 https://www.gapminder.org/data/		(life expectancy, child mortality, population NEW)
 
 
